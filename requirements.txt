@@ -1,0 +1,4 @@
+google-genai    # Gemini API agent (gemini_agent.py)
+matplotlib      # charts made by evaluate.py
+# tkinter (for gui.py) is included with Python on Windows and macOS.
+# On Linux: sudo apt install python3-tk

@@ -1,0 +1,13 @@
+{
+  "api_key": "Insert your Gemini API key here",
+  "model": "gemini-3.8-flash",
+  "difficulty": "hard",
+  "temperatures": {
+    "easy": 1.0,
+    "medium": 0.6,
+    "hard": 0.1
+  },
+  "backup_models": ["gemini-3.5-flash", "gemini-2.5-flash-lite", "gemini-3.1-flash-lite"],
+  "max_attempts": 4,
+  "min_seconds_between_calls": 4.0
+}

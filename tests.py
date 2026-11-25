@@ -9,6 +9,7 @@ import unittest
 from game import TicTacToe, StochasticTicTacToe
 from algorithms import (RandomAgent, MinimaxAgent, AlphaBetaAgent,
                         ExpectiminimaxAgent, WIN_SCORE)
+from gemini_agent import GeminiAgent, DEFAULT_CONFIG
 
 
 def play_moves(game, moves):
@@ -142,6 +143,90 @@ class TestAlgorithms(unittest.TestCase):
         agent.choose_move(g)
         self.assertIsNotNone(agent.tree)
         self.assertGreater(agent.pruned_count, 0)
+
+
+# ------------------------------------------------------------------ Gemini
+class FakeGeminiClient:
+    """
+    Stands in for the real Gemini client so these tests run offline and free.
+    It returns the given replies in order and remembers every request.
+    """
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.requests = []
+        self.models = self                      # so client.models.generate_content works
+
+    def generate_content(self, model, contents, config):
+        self.requests.append({"model": model, "contents": contents, "config": config})
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):        # simulate a network / API error
+            raise reply
+        return type("Response", (), {"text": reply})()
+
+
+def fake_gemini(replies, difficulty="hard"):
+    config = dict(DEFAULT_CONFIG, api_key="test", min_seconds_between_calls=0)
+    client = FakeGeminiClient(replies)
+    return GeminiAgent(difficulty=difficulty, client=client, config=config, seed=0), client
+
+
+class TestGemini(unittest.TestCase):
+    def test_uses_gemini_move(self):
+        agent, _ = fake_gemini(['{"row": 1, "col": 1, "reason": "centre"}'])
+        self.assertEqual(agent.choose_move(TicTacToe()), (1, 1))
+        self.assertEqual(agent.last_reason, "centre")
+        self.assertFalse(agent.used_fallback)
+
+    def test_prompt_contains_board_rules_and_legal_moves(self):
+        agent, client = fake_gemini(['{"row": 0, "col": 2}'])
+        g = play_moves(TicTacToe(size=4, win_length=3), [(0, 0)])
+        agent.choose_move(g)
+        request = client.requests[0]
+        self.assertIn("4x4", request["config"]["system_instruction"])   # game setup
+        self.assertIn("3 in a row", request["config"]["system_instruction"])
+        self.assertIn("X . . .", request["contents"])                    # the board
+        self.assertNotIn("(0,0)", request["contents"].split("Legal moves")[1])
+
+    def test_retries_after_illegal_move(self):
+        # (0, 0) is taken, so the first answer is illegal and Gemini is asked again
+        agent, client = fake_gemini(['{"row": 0, "col": 0}', '{"row": 2, "col": 2}'])
+        g = play_moves(TicTacToe(), [(0, 0)])
+        self.assertEqual(agent.choose_move(g), (2, 2))
+        self.assertEqual(agent.invalid_replies, 1)
+        self.assertIn("NOT a legal move", client.requests[1]["contents"])
+
+    def test_falls_back_to_random_on_garbage(self):
+        agent, _ = fake_gemini(["no idea", "still no", "sorry"])
+        g = TicTacToe()
+        self.assertIn(agent.choose_move(g), g.get_valid_moves())
+        self.assertTrue(agent.used_fallback)
+
+    def test_survives_api_errors(self):
+        agent, _ = fake_gemini([RuntimeError("quota")] * 3)
+        g = TicTacToe()
+        self.assertIn(agent.choose_move(g), g.get_valid_moves())
+        self.assertTrue(agent.used_fallback)
+
+    def test_parses_plain_text_reply(self):
+        self.assertEqual(GeminiAgent.parse_reply("I will play (2, 1)")[0], (2, 1))
+
+    def test_difficulty_sets_temperature(self):
+        for level in ("easy", "hard"):
+            agent, client = fake_gemini(['{"row": 1, "col": 1}'], difficulty=level)
+            agent.choose_move(TicTacToe())
+            self.assertEqual(client.requests[0]["config"]["temperature"],
+                             DEFAULT_CONFIG["temperatures"][level])
+
+    def test_stochastic_rule_is_explained(self):
+        agent, client = fake_gemini(['{"row": 1, "col": 1}'])
+        agent.choose_move(StochasticTicTacToe(success_prob=0.8))
+        self.assertIn("80%", client.requests[0]["config"]["system_instruction"])
+
+    def test_full_game_against_alphabeta(self):
+        # A "Gemini" that always answers the same square: after the first time it
+        # is illegal, so the agent must fall back - and the game still finishes.
+        agent, _ = fake_gemini(['{"row": 1, "col": 1}'] * 20)
+        self.assertIn(play_game(TicTacToe(), agent, AlphaBetaAgent()), ("O", "draw"))
 
 
 if __name__ == "__main__":

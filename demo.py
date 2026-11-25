@@ -13,6 +13,7 @@ Options:
 from game import TicTacToe, StochasticTicTacToe
 from algorithms import (RandomAgent, MinimaxAgent, AlphaBetaAgent,
                         ExpectiminimaxAgent, format_tree)
+from gemini_agent import GeminiAgent
 
 
 def ask_int(prompt, default, allowed=None):
@@ -42,10 +43,13 @@ def setup_game():
 def pick_agent(label, game):
     default_depth = None if game.size == 3 else 4
     print(f"\nChoose {label}:")
-    print("  1 = Random   2 = Minimax   3 = Alpha-Beta   4 = Expectiminimax")
-    choice = ask_int("  Agent", 3, {1, 2, 3, 4})
+    print("  1 = Random   2 = Minimax   3 = Alpha-Beta   4 = Expectiminimax   5 = Gemini")
+    choice = ask_int("  Agent", 3, {1, 2, 3, 4, 5})
     if choice == 1:
         return RandomAgent()
+    if choice == 5:
+        level = ask_int("  Gemini difficulty: 1 = easy, 2 = medium, 3 = hard", 3, {1, 2, 3})
+        return GeminiAgent(difficulty=["easy", "medium", "hard"][level - 1])
     shown = "full" if default_depth is None else default_depth
     depth = ask_int(f"  Search depth (0 = full search) [{shown}]", default_depth or 0)
     depth = None if depth == 0 else depth
@@ -57,6 +61,8 @@ def ai_turn(agent, game):
     move = agent.choose_move(game)
     new = game.make_move(move)
     slip = "" if new.last_move == move else f" -> slipped to {new.last_move}!"
+    if isinstance(agent, GeminiAgent) and agent.last_reason:
+        print(f"  Gemini says: {agent.last_reason}")
     print(f"\n{agent.name} ({game.current_player}) plays {move}{slip}   "
           f"[{agent.nodes_evaluated:,} nodes, {agent.last_time:.3f}s"
           + (f", {agent.pruned_count:,} pruned" if agent.pruned_count else "") + "]")
